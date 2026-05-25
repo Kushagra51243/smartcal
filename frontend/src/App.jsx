@@ -5,7 +5,7 @@ import dayjs from "dayjs";
 import "react-calendar/dist/Calendar.css";
 import "./index.css";
 
-const API = "http://localhost:8000";
+const API = "https://smartcal-backend-xx3w.onrender.com";
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
