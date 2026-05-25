@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Calendar from "react-calendar";
 import axios from "axios";
 import dayjs from "dayjs";
@@ -6,6 +6,27 @@ import "react-calendar/dist/Calendar.css";
 import "./index.css";
 
 const API = "https://smartcal-backend-xx3w.onrender.com";
+
+// Ask for notification permission
+const requestNotificationPermission = async () => {
+  if (!("Notification" in window)) {
+    alert("Your browser doesn't support notifications.");
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    await Notification.requestPermission();
+  }
+};
+
+// Fire a browser notification
+const fireNotification = (title, note) => {
+  if (Notification.permission === "granted") {
+    new Notification(`🔔 SmartCal: ${title}`, {
+      body: note || "It's time for your reminder!",
+      icon: "https://cdn-icons-png.flaticon.com/512/747/747310.png",
+    });
+  }
+};
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -16,8 +37,43 @@ export default function App() {
   const [note, setNote] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [notifStatus, setNotifStatus] = useState(Notification.permission);
+  const firedRef = useRef(new Set());
 
-  // Load all reminders (for dots on calendar)
+  // Ask for permission when app loads
+  useEffect(() => {
+    requestNotificationPermission().then(() => {
+      setNotifStatus(Notification.permission);
+    });
+  }, []);
+
+  // Check reminders every minute
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = dayjs();
+      const currentDate = now.format("YYYY-MM-DD");
+      const currentTime = now.format("HH:mm");
+
+      allReminders.forEach((r) => {
+        const key = `${r.id}-${r.date}-${r.time}`;
+        if (
+          r.date === currentDate &&
+          r.time === currentTime &&
+          !firedRef.current.has(key)
+        ) {
+          fireNotification(r.title, r.note);
+          firedRef.current.add(key);
+        }
+      });
+    };
+
+    // Check immediately, then every 60 seconds
+    checkReminders();
+    const interval = setInterval(checkReminders, 60000);
+    return () => clearInterval(interval);
+  }, [allReminders]);
+
+  // Load all reminders
   const fetchAllReminders = async () => {
     const res = await axios.get(`${API}/reminders`);
     setAllReminders(res.data);
@@ -31,48 +87,35 @@ export default function App() {
   useEffect(() => {
     const dateStr = dayjs(selectedDate).format("YYYY-MM-DD");
     setLoading(true);
-    axios
-      .get(`${API}/reminders/${dateStr}`)
-      .then((res) => {
-        setReminders(res.data);
-        setLoading(false);
-      });
+    axios.get(`${API}/reminders/${dateStr}`).then((res) => {
+      setReminders(res.data);
+      setLoading(false);
+    });
   }, [selectedDate]);
 
-  // Add or Edit a reminder
+  // Add or Edit reminder
   const saveReminder = async () => {
     if (!title.trim()) return alert("Please enter a title!");
     const dateStr = dayjs(selectedDate).format("YYYY-MM-DD");
 
     if (editingId) {
-      // EDIT mode
       const res = await axios.put(`${API}/reminders/${editingId}`, {
-        title,
-        date: dateStr,
-        time: time || null,
-        note: note || null,
+        title, date: dateStr, time: time || null, note: note || null,
       });
       setReminders(reminders.map((r) => (r.id === editingId ? res.data : r)));
       setAllReminders(allReminders.map((r) => (r.id === editingId ? res.data : r)));
       setEditingId(null);
     } else {
-      // ADD mode
       const res = await axios.post(`${API}/reminders`, {
-        title,
-        date: dateStr,
-        time: time || null,
-        note: note || null,
+        title, date: dateStr, time: time || null, note: note || null,
       });
       setReminders([...reminders, res.data]);
       setAllReminders([...allReminders, res.data]);
     }
 
-    setTitle("");
-    setTime("");
-    setNote("");
+    setTitle(""); setTime(""); setNote("");
   };
 
-  // Fill form with reminder data for editing
   const startEdit = (reminder) => {
     setEditingId(reminder.id);
     setTitle(reminder.title);
@@ -81,15 +124,11 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // Cancel editing
   const cancelEdit = () => {
     setEditingId(null);
-    setTitle("");
-    setTime("");
-    setNote("");
+    setTitle(""); setTime(""); setNote("");
   };
 
-  // Delete a reminder
   const deleteReminder = async (id) => {
     if (!window.confirm("Delete this reminder?")) return;
     await axios.delete(`${API}/reminders/${id}`);
@@ -98,16 +137,26 @@ export default function App() {
     if (editingId === id) cancelEdit();
   };
 
-  // Show dot on dates that have reminders
   const tileClassName = ({ date }) => {
     const dateStr = dayjs(date).format("YYYY-MM-DD");
-    const hasReminder = allReminders.some((r) => r.date === dateStr);
-    return hasReminder ? "has-reminder" : null;
+    return allReminders.some((r) => r.date === dateStr) ? "has-reminder" : null;
   };
 
   return (
     <div className="app">
       <h1>📅 SmartCal</h1>
+
+      {/* Notification status banner */}
+      {notifStatus === "denied" && (
+        <div className="notif-banner denied">
+          🔕 Notifications are blocked. Enable them in your browser settings to get reminder alerts.
+        </div>
+      )}
+      {notifStatus === "granted" && (
+        <div className="notif-banner granted">
+          🔔 Notifications are on — you'll get alerted at reminder time!
+        </div>
+      )}
 
       <Calendar
         onChange={setSelectedDate}
@@ -116,11 +165,8 @@ export default function App() {
       />
 
       <div className="reminder-panel">
-        <h2>
-          {dayjs(selectedDate).format("MMMM D, YYYY")}
-        </h2>
+        <h2>{dayjs(selectedDate).format("MMMM D, YYYY")}</h2>
 
-        {/* Form */}
         <div className="reminder-form">
           <input
             type="text"
@@ -151,7 +197,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Reminder list */}
         <div className="reminder-list">
           {loading ? (
             <p className="no-reminders">Loading...</p>
@@ -176,18 +221,8 @@ export default function App() {
                   </p>
                 </div>
                 <div className="reminder-actions">
-                  <button
-                    className="btn-edit"
-                    onClick={() => startEdit(r)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="btn-delete"
-                    onClick={() => deleteReminder(r.id)}
-                  >
-                    Delete
-                  </button>
+                  <button className="btn-edit" onClick={() => startEdit(r)}>Edit</button>
+                  <button className="btn-delete" onClick={() => deleteReminder(r.id)}>Delete</button>
                 </div>
               </div>
             ))
