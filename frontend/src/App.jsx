@@ -144,7 +144,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <h1>📅 SmartCal</h1>
+      <h1>📅 TaskCal</h1>
 
       {/* Notification status banner */}
       {notifStatus === "denied" && (
